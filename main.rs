@@ -1,45 +1,79 @@
 #![deny(clippy::pedantic, clippy::nursery)]
 
-use std::{env, fs, io, path::PathBuf, process};
+use std::{env, fs, process};
+use std::io::Result as IOResult;
+use std::path::PathBuf;
 
-const DEFAULT_DUMPSTER_FILENAME: &str = ".dumpster";
-
-fn create_dumpster() -> io::Result<()> {
-    fs::create_dir(dumpster_location())
+struct Dumpster {
+    location: PathBuf,
 }
 
-fn default_dumpster_location() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| {
-        eprintln!("error: unable to get home directory");
-        process::exit(1);
-    })
+impl Dumpster {
+    const DEFAULT_DUMPSTER_NAME: &'static str = ".dumpster";
+
+    fn create_dumpster(location: &PathBuf) -> Result<(), &'static str> {
+        fs::create_dir(location).or(Err("could not create dumpster"))
+    }
+
+    fn default_dumpster_location() -> Result<PathBuf, &'static str> {
+        dirs::home_dir().ok_or("unable to get home directory")
+    }
+
+    fn dumpster_location() -> Result<PathBuf, &'static str> {
+        let mut path = Self::default_dumpster_location()?;
+        path.push(PathBuf::from(Self::DEFAULT_DUMPSTER_NAME));
+
+        Ok(path)
+    }
+
+    pub fn with_default_location() -> Result<Dumpster, &'static str> {
+        let location: PathBuf = Self::dumpster_location()?;
+
+        if !location.exists() {
+            Self::create_dumpster(&location)?;
+        }
+
+        Ok(Dumpster { location: location })
+    }
+
+    // Instance methods
+    // TODO: generate new file names for duplicates (filename.0, filename.1)
+    //fn generate_filename(original_filename: &str) -> &str {
+
+    //}
+
+    pub fn yeet_file(&self, file: File) -> IOResult<()> {
+        let mut new_path = self.location.clone();
+        new_path.push(&file.location);
+
+        fs::rename(&file.location, new_path)
+    }
 }
 
-fn dumpster_location() -> PathBuf {
-    let mut path = default_dumpster_location();
-    path.push(PathBuf::from(DEFAULT_DUMPSTER_FILENAME));
-
-    path
+struct File {
+    location: PathBuf,
 }
 
-fn yeet_file(filename: &str) -> io::Result<()> {
-    let mut new_path = dumpster_location();
-    new_path.push(filename);
-
-    fs::rename(filename, new_path)
+impl File {
+    fn from_string(filename: &str) -> File {
+        File { location: PathBuf::from(filename) }
+    }
 }
 
 fn main() {
-    if !dumpster_location().exists() {
-        if let Err(error) = create_dumpster() {
-            eprintln!("could not create dumpster: {}", error);
-            process::exit(1);
-        }
-    }
+    let dumpster = Dumpster::with_default_location().unwrap_or_else(|error| {
+        eprintln!("failed to initialize dumpster: {}", error);
+        process::exit(1);
+    });
 
     for filename in env::args().skip(1) {
-        if let Err(error) = yeet_file(&filename) {
-            eprintln!("failed to move file {} to the dumpster: {}", filename, error);
+        let file = File::from_string(&filename);
+
+        if let Err(error) = dumpster.yeet_file(file) {
+            eprintln!(
+                "failed to move file {} to the dumpster: {}",
+                filename, error
+            );
         }
     }
 }
