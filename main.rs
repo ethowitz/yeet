@@ -1,7 +1,6 @@
 #![deny(clippy::pedantic, clippy::nursery)]
 
 use std::{env, fs, process};
-use std::io::Result as IOResult;
 use std::path::PathBuf;
 
 struct Dumpster {
@@ -10,6 +9,7 @@ struct Dumpster {
 
 impl Dumpster {
     const DEFAULT_DUMPSTER_NAME: &'static str = ".dumpster";
+    const MAX_NUMBER_OF_DUPLICATES: u16 = u16::MAX;
 
     fn create_dumpster(location: &PathBuf) -> Result<(), &'static str> {
         fs::create_dir(location).or(Err("could not create dumpster"))
@@ -26,37 +26,42 @@ impl Dumpster {
         Ok(path)
     }
 
-    pub fn with_default_location() -> Result<Dumpster, &'static str> {
+    pub fn with_default_location() -> Result<Self, &'static str> {
         let location: PathBuf = Self::dumpster_location()?;
 
         if !location.exists() {
             Self::create_dumpster(&location)?;
         }
 
-        Ok(Dumpster { location: location })
+        Ok(Self { location })
     }
 
-    // Instance methods
-    // TODO: generate new file names for duplicates (filename.0, filename.1)
-    //fn generate_filename(original_filename: &str) -> &str {
+    fn generate_filename(&self, original_filename: &str) -> Result<String, &'static str> {
+        let filename_available = |filename: &str| -> bool {
+            let mut candidate = self.location.clone();
+            candidate.push(filename);
+            
+            !candidate.exists()
+        };
 
-    //}
+        if filename_available(original_filename) {
+            Ok(String::from(original_filename))
+        } else {
+            (0..Self::MAX_NUMBER_OF_DUPLICATES).
+                map(|n| format!("{}.{}", original_filename, n)).
+                // I guess deref coercion does not happen if I just pass `filename_available`?
+                find(|s| filename_available(s)).
+                ok_or("max number of duplicate files reached")
+        }
+    }
 
-    pub fn yeet_file(&self, file: File) -> IOResult<()> {
+    pub fn yeet_file(&self, filename: &str) -> Result<(), &'static str> {
         let mut new_path = self.location.clone();
-        new_path.push(&file.location);
+        let new_filename = self.generate_filename(filename)?;
+        new_path.push(new_filename);
 
-        fs::rename(&file.location, new_path)
-    }
-}
-
-struct File {
-    location: PathBuf,
-}
-
-impl File {
-    fn from_string(filename: &str) -> File {
-        File { location: PathBuf::from(filename) }
+        fs::rename(filename, new_path).or(Err("failed to move file to dumpster"))?;
+        Ok(())
     }
 }
 
@@ -67,9 +72,7 @@ fn main() {
     });
 
     for filename in env::args().skip(1) {
-        let file = File::from_string(&filename);
-
-        if let Err(error) = dumpster.yeet_file(file) {
+        if let Err(error) = dumpster.yeet_file(&filename) {
             eprintln!(
                 "failed to move file {} to the dumpster: {}",
                 filename, error
