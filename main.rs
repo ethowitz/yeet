@@ -1,18 +1,14 @@
 #![deny(clippy::pedantic, clippy::nursery)]
 
-use std::{env, error, fmt, fs, io, process};
+use std::{env, error, fmt, fs, io, path, process};
 use std::path::PathBuf;
 
 #[derive(Debug)]
 enum YeetError {
+    // I will reevaluate this depending on how large this project becomes
     Base(&'static str),
     Io(io::Error),
-}
-
-impl From<io::Error> for YeetError {
-    fn from(err: io::Error) -> YeetError {
-        YeetError::Io(err)
-    }
+    Prefix(path::StripPrefixError),
 }
 
 impl From<&'static str> for YeetError {
@@ -21,11 +17,24 @@ impl From<&'static str> for YeetError {
     }
 }
 
+impl From<io::Error> for YeetError {
+    fn from(err: io::Error) -> YeetError {
+        YeetError::Io(err)
+    }
+}
+
+impl From<path::StripPrefixError> for YeetError {
+    fn from(err: path::StripPrefixError) -> YeetError {
+        YeetError::Prefix(err)
+    }
+}
+
 impl fmt::Display for YeetError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             YeetError::Base(ref err) => write!(f, "{}", err),
             YeetError::Io(ref err) => write!(f, "{}", err),
+            YeetError::Prefix(ref err) => write!(f, "{}", err),
         }
     }
 }
@@ -33,8 +42,9 @@ impl fmt::Display for YeetError {
 impl error::Error for YeetError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
+            YeetError::Base(_) => None,
             YeetError::Io(ref err) => err.source(),
-            _ => None,
+            YeetError::Prefix(ref err) => err.source(),
         }
     }
 }
@@ -112,8 +122,7 @@ impl Dumpster {
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
 
         if absolute_path.starts_with(&home_directory) {
-            let path_suffix = absolute_path.strip_prefix(&home_directory).
-                map_err(|_| "could not generate new path")?;
+            let path_suffix = absolute_path.strip_prefix(&home_directory)?;
 
             let mut new_path_prefix = home_directory;
             new_path_prefix.push(Self::DEFAULT_DUMPSTER_NAME);
@@ -123,7 +132,7 @@ impl Dumpster {
 
             let old_filename = Self::get_filename(&absolute_path)?;
             let new_filename = self.generate_filename(old_filename, &new_path)?;
-            fs::create_dir_all(&new_path).map_err(|_| "could not create requisite directories")?;
+            fs::create_dir_all(&new_path)?;
 
             new_path.push(new_filename);
 
@@ -136,9 +145,7 @@ impl Dumpster {
     pub fn yeet_file(&self, old_path: PathBuf) -> YeetResult<()> {
         let new_path = self.generate_path(&old_path)?;
 
-        // TODO: handle permissions errors (return OS error or check for permissions errors)
-        fs::rename(old_path, new_path).or(Err("failed to move file to dumpster"))?;
-        Ok(())
+        fs::rename(old_path, new_path).map_err(YeetError::from)
     }
 }
 
