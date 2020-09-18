@@ -91,16 +91,16 @@ impl Dumpster {
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
 
         if absolute_path.starts_with(&home_directory) {
-            let old_filename = Self::get_filename(&absolute_path)?;
-            let mut new_path_prefix = home_directory.clone();
-
-            new_path_prefix.push(Self::DEFAULT_DUMPSTER_NAME);
-            let path_suffix = absolute_path.strip_prefix(home_directory).
+            let path_suffix = absolute_path.strip_prefix(&home_directory).
                 map_err(|_| "could not generate new path")?;
+
+            let mut new_path_prefix = home_directory;
+            new_path_prefix.push(Self::DEFAULT_DUMPSTER_NAME);
 
             let mut new_path = new_path_prefix.join(path_suffix);
             new_path.pop();
 
+            let old_filename = Self::get_filename(&absolute_path)?;
             let new_filename = self.generate_filename(old_filename, &new_path)?;
             fs::create_dir_all(&new_path).map_err(|_| "could not create requisite directories")?;
 
