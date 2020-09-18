@@ -72,8 +72,8 @@ impl Dumpster {
         }
     }
 
-    fn get_absolute_path(relative_path: &PathBuf, current_dir: &PathBuf) -> YeetError<PathBuf> {
-        let mut absolute_path = current_dir.clone();
+    fn get_absolute_path(relative_path: &PathBuf) -> YeetError<PathBuf> {
+        let mut absolute_path = env::current_dir().map_err(|_| "failed to get current directory")?;
 
         for component in relative_path.iter() {
             if component == ".." {
@@ -87,11 +87,10 @@ impl Dumpster {
     }
 
     fn generate_path(&self, old_path: &PathBuf) -> YeetError<PathBuf> {
-        let current_dir = env::current_dir().map_err(|_| "failed to get current directory")?;
-        let absolute_path = Self::get_absolute_path(old_path, &current_dir)?;
+        let absolute_path = Self::get_absolute_path(old_path)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
 
-        if current_dir.starts_with(&home_directory) {
+        if absolute_path.starts_with(&home_directory) {
             let old_filename = Self::get_filename(&absolute_path)?;
             let mut new_path_prefix = home_directory.clone();
 
