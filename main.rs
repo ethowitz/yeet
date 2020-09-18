@@ -54,11 +54,9 @@ impl Dumpster {
             ok_or("could not get the filename for an argument")
     }
 
-    // BUG: pass in new path or refactor to use closures
-    fn generate_filename(&self, original_filename: &str) -> YeetError<String> {
+    fn generate_filename(&self, original_filename: &str, new_path: &PathBuf) -> YeetError<String> {
         let is_available = |filename: &str| -> bool {
-            let mut candidate = self.location.clone();
-            candidate.push(filename);
+            let candidate = new_path.join(filename);
             
             !candidate.exists()
         };
@@ -74,8 +72,8 @@ impl Dumpster {
         }
     }
 
-    fn get_absolute_path(relative_path: &PathBuf) -> YeetError<PathBuf> {
-        let mut absolute_path = env::current_dir().map_err(|_| "failed to get current directory")?;
+    fn get_absolute_path(relative_path: &PathBuf, current_dir: &PathBuf) -> YeetError<PathBuf> {
+        let mut absolute_path = current_dir.clone();
 
         for component in relative_path.iter() {
             if component == ".." {
@@ -89,16 +87,12 @@ impl Dumpster {
     }
 
     fn generate_path(&self, old_path: &PathBuf) -> YeetError<PathBuf> {
-        let absolute_path = Self::get_absolute_path(old_path)?;
-        
-        // the functional way to do this would be to compute current_dir once in #yeet_file and then
-        // define a bunch closures that have access to that variable 
         let current_dir = env::current_dir().map_err(|_| "failed to get current directory")?;
+        let absolute_path = Self::get_absolute_path(old_path, &current_dir)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
 
         if current_dir.starts_with(&home_directory) {
             let old_filename = Self::get_filename(&absolute_path)?;
-            let new_filename = self.generate_filename(old_filename)?;
             let mut new_path_prefix = home_directory.clone();
 
             new_path_prefix.push(Self::DEFAULT_DUMPSTER_NAME);
@@ -108,6 +102,7 @@ impl Dumpster {
             let mut new_path = new_path_prefix.join(path_suffix);
             new_path.pop();
 
+            let new_filename = self.generate_filename(old_filename, &new_path)?;
             fs::create_dir_all(&new_path).map_err(|_| "could not create requisite directories")?;
 
             new_path.push(new_filename);
