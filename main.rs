@@ -1,12 +1,47 @@
 #![deny(clippy::pedantic, clippy::nursery)]
 
-use std::{env, fs, process};
+use std::{env, error, fmt, fs, io, process};
 use std::path::PathBuf;
 
-// TODO: convert to
-// type YeetError<T> = Result<T, impl Error>;
-type YeetError<T> = Result<T, &'static str>;
+#[derive(Debug)]
+enum YeetError {
+    Base(&'static str),
+    Io(io::Error),
+}
 
+impl From<io::Error> for YeetError {
+    fn from(err: io::Error) -> YeetError {
+        YeetError::Io(err)
+    }
+}
+
+impl From<&'static str> for YeetError {
+    fn from(err: &'static str) -> YeetError {
+        YeetError::Base(err)
+    }
+}
+
+impl fmt::Display for YeetError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            YeetError::Base(ref err) => write!(f, "{}", err),
+            YeetError::Io(ref err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl error::Error for YeetError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            YeetError::Io(ref err) => err.source(),
+            _ => None,
+        }
+    }
+}
+
+type YeetResult<T> = Result<T, YeetError>;
+
+#[derive(Debug)]
 struct Dumpster {
     location: PathBuf,
 }
@@ -15,22 +50,22 @@ impl Dumpster {
     const DEFAULT_DUMPSTER_NAME: &'static str = ".dumpster";
     const MAX_NUMBER_OF_DUPLICATES: u16 = u16::MAX;
 
-    fn create_dumpster(location: &PathBuf) -> YeetError<()> {
-        fs::create_dir(location).or(Err("could not create dumpster"))
+    fn create_dumpster(location: &PathBuf) -> YeetResult<()> {
+        fs::create_dir(location).map_err(YeetError::from)
     }
 
-    fn default_dumpster_location() -> YeetError<PathBuf> {
-        dirs::home_dir().ok_or("unable to get home directory")
+    fn default_dumpster_location() -> YeetResult<PathBuf> {
+        dirs::home_dir().ok_or(YeetError::Base("failed to get home directory"))
     }
 
-    fn dumpster_location() -> YeetError<PathBuf> {
+    fn dumpster_location() -> YeetResult<PathBuf> {
         let mut path = Self::default_dumpster_location()?;
         path.push(PathBuf::from(Self::DEFAULT_DUMPSTER_NAME));
 
         Ok(path)
     }
 
-    pub fn with_default_location() -> YeetError<Self> {
+    pub fn with_default_location() -> YeetResult<Self> {
         let location: PathBuf = Self::dumpster_location()?;
 
         if !location.exists() {
@@ -40,26 +75,12 @@ impl Dumpster {
         Ok(Self { location })
     }
 
-    fn get_filename<'a>(path: &'a PathBuf) -> YeetError<&'a str> {
-        //let get_error_message = || -> &'static str {
-            //match path.to_str() {
-                //Some(path_as_str) =>
-                  //format!("could not get filename for argument `{}'", path_as_str).as_str(),
-                //None => "could not get the filename for an argument"
-            //}
-                //None => "could not get the filename for an argument"
-        //};
-
-        path.file_name().and_then(|s| s.to_str()).
-            ok_or("could not get the filename for an argument")
+    fn get_filename<'a>(path: &'a PathBuf) -> YeetResult<&'a str> {
+        path.file_name().and_then(|s| s.to_str()).ok_or(YeetError::Base("could not get filename"))
     }
 
-    fn generate_filename(&self, original_filename: &str, new_path: &PathBuf) -> YeetError<String> {
-        let is_available = |filename: &str| -> bool {
-            let candidate = new_path.join(filename);
-            
-            !candidate.exists()
-        };
+    fn generate_filename(&self, original_filename: &str, new_path: &PathBuf) -> YeetResult<String> {
+        let is_available = |filename: &str| -> bool { !new_path.join(filename).exists() };
 
         if is_available(original_filename) {
             Ok(String::from(original_filename))
@@ -68,12 +89,12 @@ impl Dumpster {
                 map(|n| format!("{}.{}", original_filename, n)).
                 // I guess deref coercion does not happen if I just pass `filename_available`?
                 find(|filename| is_available(filename)).
-                ok_or("max number of duplicate files reached")
+                ok_or(YeetError::Base("max number of duplicate files reached"))
         }
     }
 
-    fn get_absolute_path(relative_path: &PathBuf) -> YeetError<PathBuf> {
-        let mut absolute_path = env::current_dir().map_err(|_| "failed to get current directory")?;
+    fn get_absolute_path(relative_path: &PathBuf) -> YeetResult<PathBuf> {
+        let mut absolute_path = env::current_dir()?;
 
         for component in relative_path.iter() {
             if component == ".." {
@@ -86,7 +107,7 @@ impl Dumpster {
         Ok(absolute_path)
     }
 
-    fn generate_path(&self, old_path: &PathBuf) -> YeetError<PathBuf> {
+    fn generate_path(&self, old_path: &PathBuf) -> YeetResult<PathBuf> {
         let absolute_path = Self::get_absolute_path(old_path)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
 
@@ -108,11 +129,11 @@ impl Dumpster {
 
             Ok(new_path)
         } else {
-            Err("cannot yeet file outside of home directory")
+            Err(YeetError::Base("cannot yeet file outside of home directory"))
         }
     }
 
-    pub fn yeet_file(&self, old_path: PathBuf) -> YeetError<()> {
+    pub fn yeet_file(&self, old_path: PathBuf) -> YeetResult<()> {
         let new_path = self.generate_path(&old_path)?;
 
         // TODO: handle permissions errors (return OS error or check for permissions errors)
@@ -131,10 +152,7 @@ fn main() {
         let path = PathBuf::from(&filename);
 
         if let Err(error) = dumpster.yeet_file(path) {
-            eprintln!(
-                "failed to move file {} to the dumpster: {}",
-                filename, error
-            );
+            eprintln!("{}: {}", filename, error);
         }
     }
 }
