@@ -117,17 +117,32 @@ impl Dumpster {
         Ok(absolute_path)
     }
 
-    fn generate_path(&self, old_path: &PathBuf) -> YeetResult<PathBuf> {
-        let absolute_path = Self::get_absolute_path(old_path)?;
+    pub fn restore(&self, old_path: PathBuf) -> YeetResult<()> {
+        let absolute_path = Self::get_absolute_path(&old_path)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
+        let dumpster_prefix = home_directory.join(Self::DEFAULT_DUMPSTER_NAME);
 
-        if absolute_path.starts_with(&home_directory) {
+        if absolute_path.starts_with(&dumpster_prefix) {
+            let path_suffix = absolute_path.strip_prefix(dumpster_prefix)?;
+            let new_path = home_directory.join(path_suffix);
+
+            fs::rename(old_path, new_path).map_err(YeetError::from)
+        } else {
+            Err(YeetError::Base("cannot restore a file that is not in the dumpster"))
+        }
+    }
+
+    pub fn yeet(&self, old_path: PathBuf) -> YeetResult<()> {
+        let absolute_path = Self::get_absolute_path(&old_path)?;
+        let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
+        let dumpster_prefix = home_directory.join(Self::DEFAULT_DUMPSTER_NAME);
+
+        if absolute_path.starts_with(&dumpster_prefix) {
+            Err(YeetError::Base("cannot yeet file that is already in the dumpster"))
+        } else if absolute_path.starts_with(&home_directory) {
             let path_suffix = absolute_path.strip_prefix(&home_directory)?;
 
-            let mut new_path_prefix = home_directory;
-            new_path_prefix.push(Self::DEFAULT_DUMPSTER_NAME);
-
-            let mut new_path = new_path_prefix.join(path_suffix);
+            let mut new_path = dumpster_prefix.join(path_suffix);
             new_path.pop();
 
             let old_filename = Self::get_filename(&absolute_path)?;
@@ -136,16 +151,10 @@ impl Dumpster {
 
             new_path.push(new_filename);
 
-            Ok(new_path)
+            fs::rename(old_path, new_path).map_err(YeetError::from)
         } else {
-            Err(YeetError::Base("cannot yeet file outside of home directory"))
+            Err(YeetError::Base("cannot yeet file that is outside of the home directory"))
         }
-    }
-
-    pub fn yeet_file(&self, old_path: PathBuf) -> YeetResult<()> {
-        let new_path = self.generate_path(&old_path)?;
-
-        fs::rename(old_path, new_path).map_err(YeetError::from)
     }
 }
 
@@ -155,10 +164,20 @@ fn main() {
         process::exit(1);
     });
 
-    for filename in env::args().skip(1) {
-        let path = PathBuf::from(&filename);
+    let mut args = env::args().skip(1).peekable();
+    let yeet_file = match args.peek().map(String::as_str) {
+        Some("--restore") | Some("-r") => {
+            args.next();
+            false
+        },
+        _ => true,
+    };
 
-        if let Err(error) = dumpster.yeet_file(path) {
+    for filename in args {
+        let path = PathBuf::from(&filename);
+        let result = if yeet_file { dumpster.yeet(path) } else { dumpster.restore(path) };
+
+        if let Err(error) = result {
             eprintln!("{}: {}", filename, error);
         }
     }

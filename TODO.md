@@ -1,7 +1,4 @@
 # TODO
-* Make idempotent by making all changes at end (creation of intermediate directories, renaming of
-  file)
 * `restore` flag that allows you to move files back to their original destination
-* print help info if no arg specified
-* add man page
-* Allow users to specify alternate .dumpster name/location via env var
+* `empty` flag that permanently removes all files in the dumpster
+  - Allow for emptying of only specified subdirectories
