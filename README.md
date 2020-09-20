@@ -5,6 +5,9 @@ A tool to yeet files into the dumpster. I wrote this simple tool to:
 3. Use the word "yeet" in a public GitHub repository
 
 ## Usage
+As with any filesystem tool, `yeet` may have bugs and has the potential to remove every
+file from your disk. So use with caution!
+
 ```
 NAME
         yeet - yeet files into the dumpster
