@@ -1,7 +1,7 @@
 #![deny(clippy::pedantic, clippy::nursery)]
 
 use std::{env, error, fmt, fs, io, path, process};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 enum YeetError {
@@ -103,10 +103,10 @@ impl Dumpster {
         }
     }
 
-    fn get_absolute_path(relative_path: &PathBuf) -> YeetResult<PathBuf> {
+    fn get_absolute_path<P: AsRef<Path>>(relative_path: P) -> YeetResult<PathBuf> {
         let mut absolute_path = env::current_dir()?;
 
-        for component in relative_path.iter() {
+        for component in relative_path.as_ref().iter() {
             if component == ".." {
                 absolute_path.pop();
             } else if component != "." {
@@ -117,13 +117,32 @@ impl Dumpster {
         Ok(absolute_path)
     }
 
-    pub fn restore(&self, old_path: PathBuf) -> YeetResult<()> {
+    pub fn empty(&self) -> YeetResult<()> {
+        for entry in fs::read_dir(&self.location)? {
+            let path = entry?.path();
+
+            if path.is_dir() {
+                if let Err(error) = fs::remove_dir_all(&path) {
+                    let name = path.to_str().unwrap_or("[could not get directory name]");
+                    eprintln!("error deleting directory `{}`: {}", name, error);
+                }
+            } else if let Err(error) = fs::remove_file(&path) {
+                let name = path.to_str().unwrap_or("[could not get file name]");
+                eprintln!("error deleting file `{}`: {}", name, error);
+            }
+
+        }
+        
+        Ok(())
+    }
+
+    pub fn restore<P: AsRef<Path>>(&self, old_path: P) -> YeetResult<()>
+    {
         let absolute_path = Self::get_absolute_path(&old_path)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
-        let dumpster_prefix = home_directory.join(Self::DEFAULT_DUMPSTER_NAME);
 
-        if absolute_path.starts_with(&dumpster_prefix) {
-            let path_suffix = absolute_path.strip_prefix(dumpster_prefix)?;
+        if absolute_path.starts_with(&self.location) {
+            let path_suffix = absolute_path.strip_prefix(&self.location)?;
             let new_path = home_directory.join(path_suffix);
 
             fs::rename(old_path, new_path).map_err(YeetError::from)
@@ -132,17 +151,18 @@ impl Dumpster {
         }
     }
 
-    pub fn yeet(&self, old_path: PathBuf) -> YeetResult<()> {
+    pub fn yeet<P>(&self, old_path: P) -> YeetResult<()>
+        where P: AsRef<Path>
+    {
         let absolute_path = Self::get_absolute_path(&old_path)?;
         let home_directory = dirs::home_dir().ok_or("unable to get home directory")?;
-        let dumpster_prefix = home_directory.join(Self::DEFAULT_DUMPSTER_NAME);
 
-        if absolute_path.starts_with(&dumpster_prefix) {
+        if absolute_path.starts_with(&self.location) {
             Err(YeetError::Base("cannot yeet file that is already in the dumpster"))
         } else if absolute_path.starts_with(&home_directory) {
             let path_suffix = absolute_path.strip_prefix(&home_directory)?;
 
-            let mut new_path = dumpster_prefix.join(path_suffix);
+            let mut new_path = self.location.join(path_suffix);
             new_path.pop();
 
             let old_filename = Self::get_filename(&absolute_path)?;
@@ -165,20 +185,26 @@ fn main() {
     });
 
     let mut args = env::args().skip(1).peekable();
-    let yeet_file = match args.peek().map(String::as_str) {
-        Some("--restore") | Some("-r") => {
+
+    match args.peek().map(String::as_str) {
+        Some("--restore") => {
             args.next();
-            false
+
+            for filename in args {
+                if let Err(error) = dumpster.restore(&filename) {
+                    eprintln!("{}: {}", filename, error);
+                }
+            }
         },
-        _ => true,
-    };
-
-    for filename in args {
-        let path = PathBuf::from(&filename);
-        let result = if yeet_file { dumpster.yeet(path) } else { dumpster.restore(path) };
-
-        if let Err(error) = result {
-            eprintln!("{}: {}", filename, error);
+        Some("--empty") => {
+            if let Err(error) = dumpster.empty() {
+                eprintln!("{}", error);
+            }
+        },
+        _ => for filename in args {
+            if let Err(error) = dumpster.yeet(&filename) {
+                eprintln!("{}: {}", filename, error);
+            }
         }
-    }
+    };
 }
